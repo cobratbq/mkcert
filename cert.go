@@ -64,8 +64,9 @@ func (m *mkcert) makeCert(hosts []string) {
 	tpl := &x509.Certificate{
 		SerialNumber: randomSerialNumber(),
 		Subject: pkix.Name{
-			Organization:       []string{"mkcert development certificate"},
+			Organization:       []string{m.Organization},
 			OrganizationalUnit: []string{userAndHostname},
+			CommonName:         m.CommonName + " certificate",
 		},
 
 		NotBefore: time.Now(), NotAfter: expiration,
@@ -87,10 +88,10 @@ func (m *mkcert) makeCert(hosts []string) {
 
 	if m.client {
 		tpl.ExtKeyUsage = append(tpl.ExtKeyUsage, x509.ExtKeyUsageClientAuth)
-	}
-	if len(tpl.IPAddresses) > 0 || len(tpl.DNSNames) > 0 || len(tpl.URIs) > 0 {
+	} else {
 		tpl.ExtKeyUsage = append(tpl.ExtKeyUsage, x509.ExtKeyUsageServerAuth)
 	}
+
 	if len(tpl.EmailAddresses) > 0 {
 		tpl.ExtKeyUsage = append(tpl.ExtKeyUsage, x509.ExtKeyUsageEmailProtection)
 	}
@@ -107,10 +108,24 @@ func (m *mkcert) makeCert(hosts []string) {
 	certFile, keyFile, p12File := m.fileNames(hosts)
 
 	if !m.pkcs12 {
+		// PKCS #8 and X.509 PEM.
 		certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert})
 		privDER, err := x509.MarshalPKCS8PrivateKey(priv)
 		fatalIfErr(err, "failed to encode certificate key")
-		privPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privDER})
+		var privPEMBlock *pem.Block
+		if m.password == "" {
+			privPEMBlock = &pem.Block{Type: "PRIVATE KEY", Bytes: privDER}
+			log.Println("The private key is stored in plaintext form.")
+		} else {
+			// RFC-1423 specifies DES and 3DES encryption. RFC-8018 extends on
+			// this with AES encryption. Already NetworkManager has issues with
+			// AES ciphers, so 3DES is the only reasonable option.
+			privPEMBlock, err = x509.EncryptPEMBlock(rand.Reader, "PRIVATE KEY", privDER,
+				[]byte(m.password), x509.PEMCipher3DES)
+			fatalIfErr(err, "failed to encrypt certificate key")
+			log.Println("The private key is stored in encrypted form using AES-128.")
+		}
+		privPEM := pem.EncodeToMemory(privPEMBlock)
 
 		if certFile == keyFile {
 			err = ioutil.WriteFile(keyFile, append(certPEM, privPEM...), 0600)
@@ -122,8 +137,9 @@ func (m *mkcert) makeCert(hosts []string) {
 			fatalIfErr(err, "failed to save certificate key")
 		}
 	} else {
+		// PKCS #12 format.
 		domainCert, _ := x509.ParseCertificate(cert)
-		pfxData, err := pkcs12.Encode(rand.Reader, priv, domainCert, []*x509.Certificate{m.caCert}, "changeit")
+		pfxData, err := pkcs12.Encode(rand.Reader, priv, domainCert, []*x509.Certificate{m.caCert}, m.password)
 		fatalIfErr(err, "failed to generate PKCS#12")
 		err = ioutil.WriteFile(p12File, pfxData, 0644)
 		fatalIfErr(err, "failed to save PKCS#12")
@@ -325,13 +341,13 @@ func (m *mkcert) newCA() {
 	tpl := &x509.Certificate{
 		SerialNumber: randomSerialNumber(),
 		Subject: pkix.Name{
-			Organization:       []string{"mkcert development CA"},
+			Organization:       []string{m.Organization},
 			OrganizationalUnit: []string{userAndHostname},
 
 			// The CommonName is required by iOS to show the certificate in the
 			// "Certificate Trust Settings" menu.
 			// https://github.com/FiloSottile/mkcert/issues/47
-			CommonName: "mkcert " + userAndHostname,
+			CommonName: m.CommonName + " CA",
 		},
 		SubjectKeyId: skid[:],
 
@@ -362,5 +378,5 @@ func (m *mkcert) newCA() {
 }
 
 func (m *mkcert) caUniqueName() string {
-	return "mkcert development CA " + m.caCert.SerialNumber.String()
+	return m.CommonName + " CA " + m.caCert.SerialNumber.String()
 }

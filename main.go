@@ -65,6 +65,19 @@ const advancedUsage = `Advanced options:
 	    Generate a certificate based on the supplied CSR. Conflicts with
 	    all other flags and arguments except -install and -cert-file.
 
+	-O ORGANIZATION
+	    The value for section Organization ('O') in the subject.
+
+	-CN COMMONNAME
+	    The value for section CommonName ('CN') in the subject.
+	
+	-password PASSWORD
+	    The password used to encrypt the private key-file. By default
+	    the password is empty and therefore the private key is not
+	    encrypted.
+	    Java keystores typically expect the password 'changeit' by
+	    default.
+
 	-CAROOT
 	    Print the CA certificate and key storage location.
 
@@ -99,6 +112,9 @@ func main() {
 		keyFileFlag   = flag.String("key-file", "", "")
 		p12FileFlag   = flag.String("p12-file", "", "")
 		versionFlag   = flag.Bool("version", false, "")
+		oFlag         = flag.String("O", "mkcert development", "")
+		cnFlag        = flag.String("CN", "mkcert development", "")
+		passwordFlag  = flag.String("password", "", "")
 	)
 	flag.Usage = func() {
 		fmt.Fprint(flag.CommandLine.Output(), shortUsage)
@@ -142,6 +158,8 @@ func main() {
 		installMode: *installFlag, uninstallMode: *uninstallFlag, csrPath: *csrFlag,
 		pkcs12: *pkcs12Flag, ecdsa: *ecdsaFlag, client: *clientFlag,
 		certFile: *certFileFlag, keyFile: *keyFileFlag, p12File: *p12FileFlag,
+		Organization: *oFlag, CommonName: *cnFlag,
+		password: *passwordFlag,
 	}).Run(flag.Args())
 }
 
@@ -157,6 +175,11 @@ type mkcert struct {
 	CAROOT string
 	caCert *x509.Certificate
 	caKey  crypto.PrivateKey
+
+	Organization string
+	CommonName   string
+
+	password string
 
 	// The system cert pool is only loaded once. After installing the root, checks
 	// will keep failing until the next execution. TODO: maybe execve?
